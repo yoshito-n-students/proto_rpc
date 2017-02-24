@@ -27,3 +27,9 @@
 *.exe
 *.out
 *.app
+
+# Build directory
+build/
+
+# Editor settings
+.vscode/
