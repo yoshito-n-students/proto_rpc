@@ -1,0 +1,10 @@
+package proto_rpc;
+
+message MethodIndex{
+    required int32 value = 1;
+}
+
+message FailureInfo{
+    required bool failed = 1;
+    optional string error_text = 2;
+}

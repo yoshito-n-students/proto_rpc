@@ -1,0 +1,15 @@
+package example;
+
+option cc_generic_services = true;
+
+message Empty{
+}
+
+message Double{
+    required double value = 1;
+}
+
+service Service{
+    rpc Set (Double) returns (Empty);
+    rpc Get (Empty) returns (Double);
+}
