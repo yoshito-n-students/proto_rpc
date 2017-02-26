@@ -35,8 +35,17 @@ public:
     done->Run();
   }
 
+  void Append(::google::protobuf::RpcController *controller, const ::example::String *request,
+              ::example::String *response, ::google::protobuf::Closure *done) {
+    std::cout << "Appending the data ..." << std::endl;
+    data_ += request->data();
+    response->set_data(data_);
+    done->Run();
+  }
+
 private:
   boost::shared_ptr< double > value_;
+  gp::string data_;
 };
 
 int main(int argc, char *argv[]) {
