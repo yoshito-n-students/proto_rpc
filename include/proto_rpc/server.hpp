@@ -10,10 +10,13 @@
 #include <boost/asio/streambuf.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/bind.hpp>
-#include <boost/current_function.hpp>
 #include <boost/enable_shared_from_this.hpp>
+#include <boost/shared_ptr.hpp>
 #include <boost/system/error_code.hpp>
 
+#include <google/protobuf/descriptor.h>
+#include <google/protobuf/descriptor.pb.h>
+#include <google/protobuf/message.h>
 #include <google/protobuf/service.h>
 
 #include <proto_rpc/controller.hpp>
@@ -36,141 +39,292 @@ public:
   void start() {
     std::cout << "Started a session (" << this << ") with " << socket_.remote_endpoint()
               << std::endl;
-    startReadMethodIndex(shared_from_this());
+    startReadServiceDescriptor();
   }
 
 private:
-  static void startReadMethodIndex(const boost::shared_ptr< Session > &self) {
-    // clear the buffer
-    self->buffer_.consume(self->buffer_.size());
+  // common elements of the following data types
+  struct CommonData {
+    CommonData() { info.set_failed(false); }
 
-    const boost::shared_ptr< MethodIndex > index(new MethodIndex());
-    ba::async_read_until(self->socket_, self->buffer_, Decode(*index),
-                         boost::bind(&Session::handleReadMethodIndex, self, index, _1, _2));
+    virtual ~CommonData() {}
+
+    void setFailed(const gp::string &error_text) {
+      info.set_failed(true);
+      if (info.has_error_text()) {
+        info.set_error_text(info.error_text() + "; " + error_text);
+      } else {
+        info.set_error_text(error_text);
+      }
+    }
+
+    FailureInfo info;
+
+    ba::streambuf read_buffer;
+    ba::streambuf write_buffer;
+  };
+
+  // data used in the initial authorization
+  struct AuthorizationData : CommonData {
+    AuthorizationData() {}
+
+    virtual ~AuthorizationData() {}
+
+    gp::ServiceDescriptorProto descriptor;
+  };
+
+  // data used in a single RPC
+  struct RpcData : CommonData {
+    RpcData() : method(NULL) {}
+
+    virtual ~RpcData() {}
+
+    const gp::MethodDescriptor *method;
+    MethodIndex index;
+    boost::shared_ptr< gp::Message > request;
+    boost::shared_ptr< gp::Message > response;
+  };
+
+private:
+  /*
+  * initial authorization steps
+  *   1. read the descriptor of the client-side service
+  *   2. write the equality of the service descriptors
+  *   3. start the first RPC if the descriptors are equal
+  */
+
+  void startReadServiceDescriptor() {
+    // starting point of the initial authorization. prepare data for the authorization.
+    const boost::shared_ptr< AuthorizationData > data(new AuthorizationData());
+
+    ba::async_read_until(
+        socket_, data->read_buffer, Decode(data->descriptor),
+        boost::bind(&Session::handleReadServiceDescriptor, this, data, _1, _2, shared_from_this()));
   }
 
-  static void handleReadMethodIndex(const boost::shared_ptr< Session > &self,
-                                    const boost::shared_ptr< MethodIndex > &index,
-                                    const bs::error_code &error, const std::size_t bytes) {
-    if (error == ba::error::eof) {
-      // disconnected by the client
+  void handleReadServiceDescriptor(const boost::shared_ptr< AuthorizationData > &data,
+                                   const bs::error_code &error, const std::size_t bytes,
+                                   const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
+    if (error == ba::error::eof) { // disconnected by the client
       return;
     } else if (error) {
-      std::cerr << "Error: " << error.message() << "\n"
-                << "From: " << BOOST_CURRENT_FUNCTION << std::endl;
+      std::cerr << error.message() << std::endl;
       return;
     }
 
-    // clear the range corresponding the parsed index
-    self->buffer_.consume(bytes);
+    // clear the buffer corresponding the received descriptor
+    data->read_buffer.consume(bytes);
 
-    // look up the method
-    const gp::MethodDescriptor *method(self->service_->GetDescriptor()->method(index->value()));
-    if (!method) {
-      std::cerr << "Error: Method not found\n"
-                << "From: " << BOOST_CURRENT_FUNCTION << std::endl;
-      const boost::shared_ptr< FailureInfo > info(new FailureInfo());
-      info->set_failed(true);
-      info->set_error_text("Method not found on server");
-      startWriteResult(self, info, NULL);
+    // check if the server-side service is valid
+    if (!service_) {
+      data->setFailed("Null service on server");
+      startWriteAuthorizationResult(data);
       return;
     }
 
-    startReadRequest(self, method);
+    // check if the client-side service descriptor is valid
+    if (!data->descriptor.IsInitialized()) {
+      data->setFailed("Uninitialized service descriptor on server");
+      startWriteAuthorizationResult(data);
+      return;
+    }
+
+    // check if the service descriptors are equal
+    gp::ServiceDescriptorProto this_descriptor;
+    service_->GetDescriptor()->CopyTo(&this_descriptor);
+    if (this_descriptor.SerializeAsString() != data->descriptor.SerializeAsString()) {
+      data->setFailed("Service descriptor mismatch on server");
+      startWriteAuthorizationResult(data);
+      return;
+    }
+
+    startWriteAuthorizationResult(data);
   }
 
-  static void startReadRequest(const boost::shared_ptr< Session > &self,
-                               const gp::MethodDescriptor *method) {
-    const boost::shared_ptr< gp::Message > request(
-        self->service_->GetRequestPrototype(method).New());
-    ba::async_read_until(self->socket_, self->buffer_, Decode(*request),
-                         boost::bind(&Session::handleReadRequest, self, method, request, _1, _2));
+  void startWriteAuthorizationResult(const boost::shared_ptr< AuthorizationData > &data) {
+    encode(data->info, data->write_buffer);
+
+    ba::async_write(
+        socket_, data->write_buffer,
+        boost::bind(&Session::handleWriteAuthorizationResult, this, data, _1, shared_from_this()));
   }
 
-  static void handleReadRequest(const boost::shared_ptr< Session > &self,
-                                const gp::MethodDescriptor *method,
-                                const boost::shared_ptr< gp::Message > &request,
-                                const bs::error_code &error, const std::size_t bytes) {
-    if (error == ba::error::eof) {
-      // disconnected by the client
+  void handleWriteAuthorizationResult(const boost::shared_ptr< AuthorizationData > &data,
+                                      const bs::error_code &error,
+                                      const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
+    if (error == ba::error::eof) { // disconnected by the client
       return;
     } else if (error) {
-      std::cerr << "Error: " << error.message() << "\n"
-                << "From: " << BOOST_CURRENT_FUNCTION << std::endl;
+      std::cerr << error.message() << std::endl;
+      return;
+    }
+
+    // start the first RPC if the authorization is ok
+    if (!data->info.failed()) {
+      startReadMethodIndex();
+    }
+
+    // end of the initial authorization. the authorization data is destructed here.
+  }
+
+  /*
+  * RPC steps
+  *   1. read the index of a method to be called (go 2a if the index is valid, or 2b)
+  *   2a. read a request of the method (go 3 if the request is valid, or 4)
+  *   2b. consume a request of the method (go 4)
+  *   3. call the method with the request
+  *   4. write the result of this RPC
+  *   5. start the next RPC
+  */
+
+  void startReadMethodIndex() {
+    // starting point of a RPC. prepare data for this RPC.
+    const boost::shared_ptr< RpcData > data(new RpcData());
+
+    ba::async_read_until(
+        socket_, data->read_buffer, Decode(data->index),
+        boost::bind(&Session::handleReadMethodIndex, this, data, _1, _2, shared_from_this()));
+  }
+
+  void handleReadMethodIndex(const boost::shared_ptr< RpcData > &data, const bs::error_code &error,
+                             const std::size_t bytes,
+                             const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
+    if (error == ba::error::eof) { // disconnected by the client
+      return;
+    } else if (error) {
+      std::cerr << error.message() << std::endl;
+      return;
+    }
+
+    // clear the buffer corresponding the received index
+    data->read_buffer.consume(bytes);
+
+    // check if the received method index is valid
+    if (!data->index.IsInitialized()) {
+      data->setFailed("Uninitialized method index on server");
+      startConsumeRequest(data);
+      return;
+    }
+
+    // check if the method index is in range
+    data->method = service_->GetDescriptor()->method(data->index.value());
+    if (!data->method) {
+      data->setFailed("Method not found on server");
+      startConsumeRequest(data);
+      return;
+    }
+
+    startReadRequest(data);
+  }
+
+  void startReadRequest(const boost::shared_ptr< RpcData > &data) {
+    data->request.reset(service_->GetRequestPrototype(data->method).New());
+    ba::async_read_until(
+        socket_, data->read_buffer, Decode(*data->request),
+        boost::bind(&Session::handleReadRequest, this, data, _1, _2, shared_from_this()));
+  }
+
+  void handleReadRequest(const boost::shared_ptr< RpcData > &data, const bs::error_code &error,
+                         const std::size_t bytes,
+                         const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
+    if (error == ba::error::eof) { // disconnected by the client
+      return;
+    } else if (error) {
+      std::cerr << error.message() << std::endl;
       return;
     }
 
     // clear the range corresponding the parsed request
-    self->buffer_.consume(bytes);
+    data->read_buffer.consume(bytes);
 
-    if (!request->IsInitialized()) {
-      std::cerr << "Error: Uninitialized request\n"
-                << "From: " << BOOST_CURRENT_FUNCTION << std::endl;
-      const boost::shared_ptr< FailureInfo > info(new FailureInfo());
-      info->set_failed(true);
-      info->set_error_text("Uninitialized request on server");
-      startWriteResult(self, info, NULL);
+    // check if the request is valid
+    if (!data->request->IsInitialized()) {
+      data->setFailed("Uninitialized request on server");
+      startWriteRpcResult(data);
       return;
     }
 
-    // call the method with the request
-    callMethod(self, method, request);
+    callMethod(data);
   }
 
-  static void callMethod(const boost::shared_ptr< Session > &self,
-                         const gp::MethodDescriptor *method,
-                         const boost::shared_ptr< gp::Message > &request) {
-    const boost::shared_ptr< Controller > controller(new Controller());
-    const boost::shared_ptr< gp::Message > response(
-        self->service_->GetResponsePrototype(method).New());
-    self->service_->CallMethod(method, controller.get(), request.get(), response.get(),
-                               gp::NewCallback(&gp::DoNothing));
-
-    startWriteResult(self, controller, response);
+  void startConsumeRequest(const boost::shared_ptr< RpcData > &data) {
+    data->request.reset(new Placeholder());
+    ba::async_read_until(
+        socket_, data->read_buffer, Decode(*data->request),
+        boost::bind(&Session::handleConsumeRequest, this, data, _1, _2, shared_from_this()));
   }
 
-  static void startWriteResult(const boost::shared_ptr< Session > &self,
-                               const boost::shared_ptr< FailureInfo > &info,
-                               const boost::shared_ptr< gp::Message > &response) {
-    // clear the buffer
-    self->buffer_.consume(self->buffer_.size());
-
-    // set the failure info if the response is invalid
-    if (!info->failed() && !response->IsInitialized()) {
-      std::cerr << "Error: Uninitialized response\n"
-                << "From: " << BOOST_CURRENT_FUNCTION << std::endl;
-      info->set_failed(true);
-      info->set_error_text("Uninitialized response on server");
-    }
-
-    // encode the result
-    encode(*info, self->buffer_);
-    if (!info->failed()) {
-      encode(*response, self->buffer_);
-    }
-
-    // send the result
-    ba::async_write(self->socket_, self->buffer_,
-                    boost::bind(&Session::handleWriteResult, self, _1));
-  }
-
-  static void handleWriteResult(const boost::shared_ptr< Session > &self,
-                                const bs::error_code &error) {
-    if (error == ba::error::eof) {
-      // disconnected by the client
+  void handleConsumeRequest(const boost::shared_ptr< RpcData > &data, const bs::error_code &error,
+                            const std::size_t bytes,
+                            const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
+    if (error == ba::error::eof) { // disconnected by the client
       return;
     } else if (error) {
-      std::cerr << "Error: " << error.message() << "\n"
-                << "From: " << BOOST_CURRENT_FUNCTION << std::endl;
+      std::cerr << error.message() << std::endl;
       return;
     }
 
-    startReadMethodIndex(self);
+    // clear the range corresponding the received request
+    data->read_buffer.consume(bytes);
+
+    startWriteRpcResult(data);
+  }
+
+  void callMethod(const boost::shared_ptr< RpcData > &data) {
+    // call the method
+    Controller controller;
+    data->response.reset(service_->GetResponsePrototype(data->method).New());
+    service_->CallMethod(data->method, &controller, data->request.get(), data->response.get(),
+                         gp::NewCallback(&gp::DoNothing));
+
+    // check if the call is succeeded
+    if (controller.Failed()) {
+      data->setFailed(controller.ErrorText());
+      startWriteRpcResult(data);
+      return;
+    }
+
+    // check if the call returned a valid response
+    if (!data->response->IsInitialized()) {
+      data->setFailed("Uninitialized response on server");
+      startWriteRpcResult(data);
+      return;
+    }
+
+    startWriteRpcResult(data);
+  }
+
+  void startWriteRpcResult(const boost::shared_ptr< RpcData > &data) {
+    // ensure the response exists
+    if (!data->response) {
+      data->response.reset(new Placeholder());
+    }
+
+    // encode the failure info and the response
+    encode(data->info, data->write_buffer);
+    encode(*data->response, data->write_buffer);
+
+    ba::async_write(socket_, data->write_buffer, boost::bind(&Session::handleWriteRpcResult, this,
+                                                             data, _1, shared_from_this()));
+  }
+
+  void handleWriteRpcResult(const boost::shared_ptr< RpcData > &, const bs::error_code &error,
+                            const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
+    if (error == ba::error::eof) { // disconnected by the client
+      return;
+    } else if (error) {
+      std::cerr << error.message() << std::endl;
+      return;
+    }
+
+    // start the next RPC
+    startReadMethodIndex();
+
+    // end of this RPC. the data is destructed here.
   }
 
 private:
   ba::ip::tcp::socket socket_;
-  ba::streambuf buffer_;
   const boost::shared_ptr< gp::Service > service_;
 };
 
@@ -195,8 +349,7 @@ private:
 
   void handleAccept(const boost::shared_ptr< Session > &session, const bs::error_code &error) {
     if (error) {
-      std::cerr << "Error: " << error.message() << "\n"
-                << "From: " << BOOST_CURRENT_FUNCTION << std::endl;
+      std::cerr << error.message() << std::endl;
       startAccept();
       return;
     }

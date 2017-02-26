@@ -1,18 +1,13 @@
 #ifndef PROTO_RPC_CONTROLLER
 #define PROTO_RPC_CONTROLLER
 
-#include <iostream>
-
-#include <boost/current_function.hpp>
-
 #include <google/protobuf/service.h> // for RpcConteoller
 
 #include <proto_rpc/namespace.hpp>
-#include <proto_rpc/rpc_messages.hpp> // for FailureInfo
 
 namespace proto_rpc {
 
-class Controller : public gp::RpcController, public FailureInfo {
+class Controller : public gp::RpcController {
 public:
   Controller() { Reset(); }
 
@@ -21,29 +16,30 @@ public:
   // failure info
 
   void Reset() {
-    FailureInfo::Clear();
-    FailureInfo::set_failed(false);
+    failed_ = false;
+    error_text_.clear();
   }
 
-  bool Failed() const { return FailureInfo::failed(); }
+  bool Failed() const { return failed_; }
 
   void SetFailed(const gp::string &reason) {
-    FailureInfo::set_failed(true);
-    FailureInfo::set_error_text(reason);
+    failed_ = true;
+    error_text_ = reason;
   }
 
-  gp::string ErrorText() const { return FailureInfo::error_text(); }
+  gp::string ErrorText() const { return error_text_; }
 
   // cancel operations (not supported)
 
-  void StartCancel() {
-    std::cerr << "Error: Not implemented\n"
-              << "From: " << BOOST_CURRENT_FUNCTION << std::endl;
-  }
+  void StartCancel() {}
 
   bool IsCanceled() const { return false; }
 
   void NotifyOnCancel(gp::Closure *) {}
+
+private:
+  bool failed_;
+  gp::string error_text_;
 };
 }
 

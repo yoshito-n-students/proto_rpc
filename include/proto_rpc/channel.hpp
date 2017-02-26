@@ -10,12 +10,16 @@
 #include <boost/asio/read_until.hpp>
 #include <boost/asio/streambuf.hpp>
 #include <boost/asio/write.hpp>
-#include <boost/current_function.hpp>
+#include <boost/shared_ptr.hpp>
+#include <boost/system/system_error.hpp>
 
 #include <google/protobuf/descriptor.h>
+#include <google/protobuf/descriptor.pb.h>
 #include <google/protobuf/message.h>
-#include <google/protobuf/service.h> // for RpcChannel
+#include <google/protobuf/service.h>      // for RpcChannel
+#include <google/protobuf/stubs/common.h> // for callbacks
 
+#include <proto_rpc/controller.hpp>
 #include <proto_rpc/message_coding.hpp>
 #include <proto_rpc/namespace.hpp>
 #include <proto_rpc/rpc_messages.hpp>
@@ -31,8 +35,19 @@ public:
 
   void CallMethod(const gp::MethodDescriptor *method, gp::RpcController *controller,
                   const gp::Message *request, gp::Message *response, gp::Closure *done) {
+    // ensure a controller and a closure exist
+    boost::shared_ptr< gp::RpcController > _controller;
+    if (!controller) {
+      _controller.reset(new Controller());
+      controller = _controller.get();
+    }
+    if (!done) {
+      // Note: this closure delete itself when Run() is called
+      done = gp::NewCallback(&gp::DoNothing);
+    }
+
     try {
-      // check arguments
+      // check inputs
       if (!method) {
         throw std::runtime_error("Null method");
       }
@@ -46,61 +61,83 @@ public:
         throw std::runtime_error("Uninitialized request");
       }
 
-      // connect to the server as needed
+      // connect to the server if not connected
       if (!socket_.is_open()) {
         socket_.connect(endpoint_);
         std::cout << "Connected to a server at " << endpoint_ << std::endl;
-      }
 
-      // clear the buffer
-      buffer_.consume(buffer_.size());
+        // send the service description to the sever once connected
+        {
+          gp::ServiceDescriptorProto descriptor;
+          method->service()->CopyTo(&descriptor);
+          ba::streambuf buffer;
+          encode(descriptor, buffer);
+          ba::write(socket_, buffer);
+        }
 
-      // send the method index and the request
-      {
-        MethodIndex index;
-        index.set_value(method->index());
-        encode(index, buffer_);
-        encode(*request, buffer_);
-      }
-      ba::write(socket_, buffer_);
-
-      // receive the result
-      {
-        std::size_t bytes;
+        // receive a match result against a description the server has
         FailureInfo info;
-        bytes = ba::read_until(socket_, buffer_, Decode(info));
-        buffer_.consume(bytes);
+        {
+          ba::streambuf buffer;
+          buffer.consume(ba::read_until(socket_, buffer, Decode(info)));
+        }
+
+        // check the match result
+        if (!info.IsInitialized()) {
+          throw std::runtime_error("Uninitialized failure info");
+        }
         if (info.failed()) {
           throw std::runtime_error(info.error_text());
         }
       }
 
-      // receive the response
+      // send the method index and the request
       {
-        std::size_t bytes;
-        bytes = ba::read_until(socket_, buffer_, Decode(*response));
-        buffer_.consume(bytes);
-        if (!response->IsInitialized()) {
-          throw std::runtime_error("Uninitialized response");
-        }
+        MethodIndex index;
+        index.set_value(method->index());
+        ba::streambuf buffer;
+        encode(index, buffer);
+        encode(*request, buffer);
+        ba::write(socket_, buffer);
       }
-    } catch (const std::runtime_error &error) {
-      std::cerr << "Error: " << error.what() << "\n"
-                << "From: " << BOOST_CURRENT_FUNCTION << std::endl;
-      if (controller) {
-        controller->SetFailed(error.what());
+
+      // receive the failure info and the response
+      FailureInfo info;
+      {
+        ba::streambuf buffer;
+        buffer.consume(ba::read_until(socket_, buffer, Decode(info)));
+        buffer.consume(ba::read_until(socket_, buffer, Decode(*response)));
       }
-    }
-    // finally run the closure
-    if (done) {
+
+      // check outputs
+      if (!info.IsInitialized()) {
+        throw std::runtime_error("Uninitialized failure info");
+      }
+      if (info.failed()) {
+        throw std::runtime_error(info.error_text());
+      }
+      if (!response->IsInitialized()) {
+        throw std::runtime_error("Uninitialized response");
+      }
+    } catch (const bs::system_error &error) {
+      // a network error
+      socket_.close();
+      controller->SetFailed(error.what());
       done->Run();
+      return;
+    } catch (const std::runtime_error &error) {
+      // a rpc failure not by network reasons
+      controller->SetFailed(error.what());
+      done->Run();
+      return;
     }
+
+    done->Run();
   }
 
 private:
-  const ba::ip::tcp::endpoint endpoint_;
   ba::ip::tcp::socket socket_;
-  ba::streambuf buffer_;
+  const ba::ip::tcp::endpoint endpoint_;
 };
 }
 
