@@ -8,3 +8,6 @@ message FailureInfo{
     required bool failed = 1;
     optional string error_text = 2;
 }
+
+message Placeholder{
+}
