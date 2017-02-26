@@ -6,7 +6,6 @@ project(proto_rpc)
 # Existing libraries this project uses
 find_package(
     Boost REQUIRED
-    program_options
     system
 )
 find_library(
