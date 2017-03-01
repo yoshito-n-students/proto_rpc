@@ -42,7 +42,7 @@ public:
       controller = _controller.get();
     }
     if (!done) {
-      // Note: this closure delete itself when Run() is called
+      // Note: this closure deletes itself when Run() is called
       done = gp::NewCallback(&gp::DoNothing);
     }
 
