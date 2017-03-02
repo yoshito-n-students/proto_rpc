@@ -35,7 +35,8 @@ public:
   template < typename Iterator >
   std::pair< Iterator, bool > operator()(Iterator begin, Iterator end) const {
     // convert the given range to an input stream
-    gp::io::CodedInputStream input(reinterpret_cast< const gp::uint8 * >(&(*begin)), end - begin);
+    gp::io::CodedInputStream input(reinterpret_cast< const gp::uint8 * >(&(*begin)),
+                                   static_cast< int >(end - begin));
 
     // read the message length
     gp::uint32 message_size;
@@ -48,7 +49,7 @@ public:
       const void *data;
       int size;
       input.GetDirectBufferPointer(&data, &size);
-      if (message_size > size) {
+      if (static_cast< int >(message_size) > size) {
         return std::pair< Iterator, bool >(begin, false);
       }
     }
