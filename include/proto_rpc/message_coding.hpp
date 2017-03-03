@@ -48,7 +48,9 @@ public:
     {
       const void *data;
       int size;
-      input.GetDirectBufferPointer(&data, &size);
+      if (!input.GetDirectBufferPointer(&data, &size)) {
+        size = 0;
+      }
       if (static_cast< int >(message_size) > size) {
         return std::pair< Iterator, bool >(begin, false);
       }
