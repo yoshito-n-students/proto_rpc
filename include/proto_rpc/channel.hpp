@@ -28,8 +28,8 @@ namespace proto_rpc {
 
 class Channel : public gp::RpcChannel {
 public:
-  Channel(ba::io_service &queue, const std::string &address, const unsigned short port)
-      : endpoint_(ba::ip::address_v4::from_string(address), port), socket_(queue) {}
+  Channel(ba::io_service &queue, const ba::ip::address_v4 &address, const unsigned short port)
+      : endpoint_(address, port), socket_(queue) {}
 
   virtual ~Channel() {}
 
@@ -75,6 +75,8 @@ public:
           ba::write(socket_, buffer);
         }
 
+        std::cout << "!!" << std::endl;
+
         // receive a match result against a description the server has
         FailureInfo info;
         {
@@ -91,6 +93,8 @@ public:
         }
       }
 
+      std::cout << "!!" << std::endl;
+
       // send the method index and the request
       {
         MethodIndex index;
@@ -101,6 +105,8 @@ public:
         ba::write(socket_, buffer);
       }
 
+      std::cout << "!!" << std::endl;
+
       // receive the failure info and the response
       FailureInfo info;
       {
@@ -108,6 +114,8 @@ public:
         buffer.consume(ba::read_until(socket_, buffer, Decode(info)));
         buffer.consume(ba::read_until(socket_, buffer, Decode(*response)));
       }
+
+      std::cout << "!!" << std::endl;
 
       // check outputs
       if (!info.IsInitialized()) {
