@@ -3,6 +3,7 @@
 
 namespace boost {
 namespace asio {}
+namespace posix_time {}
 namespace system {}
 }
 
@@ -12,6 +13,7 @@ namespace protobuf {}
 
 namespace proto_rpc {
 namespace ba = boost::asio;
+namespace bp = boost::posix_time;
 namespace bs = boost::system;
 namespace gp = google::protobuf;
 }

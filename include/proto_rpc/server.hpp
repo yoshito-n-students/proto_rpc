@@ -3,6 +3,7 @@
 
 #include <iostream>
 
+#include <boost/asio/deadline_timer.hpp>
 #include <boost/asio/error.hpp>
 #include <boost/asio/io_service.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -10,6 +11,7 @@
 #include <boost/asio/streambuf.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/bind.hpp>
+#include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/enable_shared_from_this.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/system/error_code.hpp>
@@ -31,7 +33,7 @@ class Session : public boost::enable_shared_from_this< Session > {
 
 private:
   Session(ba::io_service &queue, const boost::shared_ptr< gp::Service > &service)
-      : socket_(queue), service_(service) {}
+      : socket_(queue), timer_(queue), service_(service) {}
 
 public:
   virtual ~Session() { std::cout << "Closed the session (" << this << ")" << std::endl; }
@@ -43,6 +45,9 @@ public:
   }
 
 private:
+  // timeout in network operations in ms
+  enum { TIMEOUT = 5000 };
+
   // common elements of the following data types
   struct CommonData {
     CommonData() { info.set_failed(false); }
@@ -97,6 +102,11 @@ private:
     // starting point of the initial authorization. prepare data for the authorization.
     const boost::shared_ptr< AuthorizationData > data(new AuthorizationData());
 
+    // set timeout. on timeout, the expiration handler will cancel operations on the socket.
+    timer_.expires_from_now(bp::milliseconds(TIMEOUT));
+    timer_.async_wait(boost::bind(&Session::handleExpire, this, _1, shared_from_this()));
+
+    // start reading the socket. the receive handler will cancel the timeout.
     ba::async_read_until(
         socket_, data->read_buffer, Decode(data->descriptor),
         boost::bind(&Session::handleReadServiceDescriptor, this, data, _1, _2, shared_from_this()));
@@ -105,6 +115,9 @@ private:
   void handleReadServiceDescriptor(const boost::shared_ptr< AuthorizationData > &data,
                                    const bs::error_code &error, const std::size_t bytes,
                                    const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
+    // cancel the timer
+    timer_.cancel();
+
     if (error == ba::error::eof) { // disconnected by the client
       return;
     } else if (error) {
@@ -144,6 +157,9 @@ private:
   void startWriteAuthorizationResult(const boost::shared_ptr< AuthorizationData > &data) {
     encode(data->info, data->write_buffer);
 
+    timer_.expires_from_now(bp::milliseconds(TIMEOUT));
+    timer_.async_wait(boost::bind(&Session::handleExpire, this, _1, shared_from_this()));
+
     ba::async_write(
         socket_, data->write_buffer,
         boost::bind(&Session::handleWriteAuthorizationResult, this, data, _1, shared_from_this()));
@@ -152,6 +168,8 @@ private:
   void handleWriteAuthorizationResult(const boost::shared_ptr< AuthorizationData > &data,
                                       const bs::error_code &error,
                                       const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
+    timer_.cancel();
+
     if (error == ba::error::eof) { // disconnected by the client
       return;
     } else if (error) {
@@ -181,6 +199,9 @@ private:
     // starting point of a RPC. prepare data for this RPC.
     const boost::shared_ptr< RpcData > data(new RpcData());
 
+    timer_.expires_from_now(bp::milliseconds(TIMEOUT));
+    timer_.async_wait(boost::bind(&Session::handleExpire, this, _1, shared_from_this()));
+
     ba::async_read_until(
         socket_, data->read_buffer, Decode(data->index),
         boost::bind(&Session::handleReadMethodIndex, this, data, _1, _2, shared_from_this()));
@@ -189,6 +210,8 @@ private:
   void handleReadMethodIndex(const boost::shared_ptr< RpcData > &data, const bs::error_code &error,
                              const std::size_t bytes,
                              const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
+    timer_.cancel();
+
     if (error == ba::error::eof) { // disconnected by the client
       return;
     } else if (error) {
@@ -219,6 +242,10 @@ private:
 
   void startReadRequest(const boost::shared_ptr< RpcData > &data) {
     data->request.reset(service_->GetRequestPrototype(data->method).New());
+
+    timer_.expires_from_now(bp::milliseconds(TIMEOUT));
+    timer_.async_wait(boost::bind(&Session::handleExpire, this, _1, shared_from_this()));
+
     ba::async_read_until(
         socket_, data->read_buffer, Decode(*data->request),
         boost::bind(&Session::handleReadRequest, this, data, _1, _2, shared_from_this()));
@@ -227,6 +254,8 @@ private:
   void handleReadRequest(const boost::shared_ptr< RpcData > &data, const bs::error_code &error,
                          const std::size_t bytes,
                          const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
+    timer_.cancel();
+
     if (error == ba::error::eof) { // disconnected by the client
       return;
     } else if (error) {
@@ -249,6 +278,10 @@ private:
 
   void startConsumeRequest(const boost::shared_ptr< RpcData > &data) {
     data->request.reset(new Placeholder());
+
+    timer_.expires_from_now(bp::milliseconds(TIMEOUT));
+    timer_.async_wait(boost::bind(&Session::handleExpire, this, _1, shared_from_this()));
+
     ba::async_read_until(
         socket_, data->read_buffer, Decode(*data->request),
         boost::bind(&Session::handleConsumeRequest, this, data, _1, _2, shared_from_this()));
@@ -257,6 +290,8 @@ private:
   void handleConsumeRequest(const boost::shared_ptr< RpcData > &data, const bs::error_code &error,
                             const std::size_t bytes,
                             const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
+    timer_.cancel();
+
     if (error == ba::error::eof) { // disconnected by the client
       return;
     } else if (error) {
@@ -304,12 +339,17 @@ private:
     encode(data->info, data->write_buffer);
     encode(*data->response, data->write_buffer);
 
+    timer_.expires_from_now(bp::milliseconds(TIMEOUT));
+    timer_.async_wait(boost::bind(&Session::handleExpire, this, _1, shared_from_this()));
+
     ba::async_write(socket_, data->write_buffer, boost::bind(&Session::handleWriteRpcResult, this,
                                                              data, _1, shared_from_this()));
   }
 
   void handleWriteRpcResult(const boost::shared_ptr< RpcData > &, const bs::error_code &error,
                             const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
+    timer_.cancel();
+
     if (error == ba::error::eof) { // disconnected by the client
       return;
     } else if (error) {
@@ -323,8 +363,21 @@ private:
     // end of this RPC. the data is destructed here.
   }
 
+  void handleExpire(const bs::error_code &error,
+                    const boost::shared_ptr< Session > & /* tracked_this_ptr*/) {
+    if (error == ba::error::operation_aborted) { // timeout is canceled
+      return;
+    } else if (error) {
+      std::cerr << error.message() << std::endl;
+      return;
+    }
+
+    socket_.cancel();
+  }
+
 private:
   ba::ip::tcp::socket socket_;
+  ba::deadline_timer timer_;
   const boost::shared_ptr< gp::Service > service_;
 };
 
@@ -349,7 +402,7 @@ private:
 
   void handleAccept(const boost::shared_ptr< Session > &session, const bs::error_code &error) {
     if (error) {
-      std::cerr << error.message() << std::endl;
+      std::cerr << "Error on accepting: " << error.message() << std::endl;
       startAccept();
       return;
     }

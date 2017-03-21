@@ -56,8 +56,7 @@ int main(int argc, char *argv[]) {
   }
 
   // construct a RPC client
-  ba::io_service queue;
-  const boost::shared_ptr< pr::Channel > channel(new pr::Channel(queue, address, port));
+  const boost::shared_ptr< pr::Channel > channel(new pr::Channel(address, port));
   const boost::shared_ptr< example::Service > client(new example::Service::Stub(channel.get()));
 
   // call Get(). this shall return an error if Set() never called
