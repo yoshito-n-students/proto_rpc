@@ -13,6 +13,8 @@
 #include <boost/bind.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/enable_shared_from_this.hpp>
+#include <boost/make_shared.hpp>
+#include <boost/scoped_ptr.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/system/error_code.hpp>
 
@@ -31,11 +33,10 @@ namespace proto_rpc {
 class Session : public boost::enable_shared_from_this< Session > {
   friend class Server;
 
-private:
+public:
   Session(ba::io_service &queue, const boost::shared_ptr< gp::Service > &service)
       : socket_(queue), timer_(queue), service_(service) {}
 
-public:
   virtual ~Session() { std::cout << "Closed the session (" << this << ")" << std::endl; }
 
   void start() {
@@ -86,8 +87,8 @@ private:
 
     const gp::MethodDescriptor *method;
     MethodIndex index;
-    boost::shared_ptr< gp::Message > request;
-    boost::shared_ptr< gp::Message > response;
+    boost::scoped_ptr< gp::Message > request;
+    boost::scoped_ptr< gp::Message > response;
   };
 
 private:
@@ -100,7 +101,7 @@ private:
 
   void startReadServiceDescriptor() {
     // starting point of the initial authorization. prepare data for the authorization.
-    const boost::shared_ptr< AuthorizationData > data(new AuthorizationData());
+    const boost::shared_ptr< AuthorizationData > data(boost::make_shared< AuthorizationData >());
 
     // set timeout. on timeout, the expiration handler will cancel operations on the socket.
     timer_.expires_from_now(bp::milliseconds(TIMEOUT));
@@ -197,7 +198,7 @@ private:
 
   void startReadMethodIndex() {
     // starting point of a RPC. prepare data for this RPC.
-    const boost::shared_ptr< RpcData > data(new RpcData());
+    const boost::shared_ptr< RpcData > data(boost::make_shared< RpcData >());
 
     timer_.expires_from_now(bp::milliseconds(TIMEOUT));
     timer_.async_wait(boost::bind(&Session::handleExpire, this, _1, shared_from_this()));
@@ -364,7 +365,7 @@ private:
   }
 
   void handleExpire(const bs::error_code &error,
-                    const boost::shared_ptr< Session > & /* tracked_this_ptr*/) {
+                    const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
     if (error == ba::error::operation_aborted) { // timeout is canceled
       return;
     } else if (error) {
@@ -396,7 +397,8 @@ public:
 
 private:
   void startAccept() {
-    const boost::shared_ptr< Session > session(new Session(acceptor_.get_io_service(), service_));
+    const boost::shared_ptr< Session > session(
+        boost::make_shared< Session >(acceptor_.get_io_service(), service_));
     acceptor_.async_accept(session->socket_, boost::bind(&Server::handleAccept, this, session, _1));
   }
 

@@ -11,7 +11,7 @@
 #include <boost/program_options/parsers.hpp>
 #include <boost/program_options/value_semantic.hpp>
 #include <boost/program_options/variables_map.hpp>
-#include <boost/shared_ptr.hpp>
+#include <boost/scoped_ptr.hpp>
 
 #include <proto_rpc/channel.hpp>
 #include <proto_rpc/controller.hpp>
@@ -56,8 +56,8 @@ int main(int argc, char *argv[]) {
   }
 
   // construct a RPC client
-  const boost::shared_ptr< pr::Channel > channel(new pr::Channel(address, port));
-  const boost::shared_ptr< example::Service > client(new example::Service::Stub(channel.get()));
+  const boost::scoped_ptr< pr::Channel > channel(new pr::Channel(address, port));
+  const boost::scoped_ptr< example::Service > client(new example::Service::Stub(channel.get()));
 
   // call Get(). this shall return an error if Set() never called
   {

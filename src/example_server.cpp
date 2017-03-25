@@ -1,4 +1,6 @@
 #include <boost/asio/io_service.hpp>
+#include <boost/make_shared.hpp>
+#include <boost/optional.hpp>
 #include <boost/shared_ptr.hpp>
 
 #include <proto_rpc/server.hpp>
@@ -16,18 +18,14 @@ public:
   void Set(gp::RpcController *controller, const example::Double *request, example::Empty *response,
            gp::Closure *done) {
     std::cout << "Setting the value to " << request->value() << " ..." << std::endl;
-    if (!value_) {
-      value_.reset(new double(request->value()));
-    } else {
-      *value_ = request->value();
-    }
+    value_ = request->value();
     done->Run();
   }
 
   void Get(gp::RpcController *controller, const example::Empty *request, example::Double *response,
            gp::Closure *done) {
     std::cout << "Getting the value ..." << std::endl;
-    if (!value_) {
+    if (value_ == boost::none) {
       controller->SetFailed("Value never set");
     } else {
       response->set_value(*value_);
@@ -44,15 +42,14 @@ public:
   }
 
 private:
-  boost::shared_ptr< double > value_;
+  boost::optional< double > value_;
   gp::string data_;
 };
 
 int main(int argc, char *argv[]) {
 
   ba::io_service queue;
-  boost::shared_ptr< Service > service(new Service());
-  pr::Server server(queue, 12345, service);
+  pr::Server server(queue, 12345, boost::make_shared< Service >());
   server.start();
 
   queue.run();

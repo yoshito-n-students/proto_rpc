@@ -12,7 +12,7 @@
 #include <boost/asio/write.hpp>
 #include <boost/bind.hpp>
 #include <boost/ref.hpp>
-#include <boost/shared_ptr.hpp>
+#include <boost/scoped_ptr.hpp>
 #include <boost/system/error_code.hpp>
 #include <boost/system/system_error.hpp>
 
@@ -39,7 +39,7 @@ public:
   void CallMethod(const gp::MethodDescriptor *method, gp::RpcController *controller,
                   const gp::Message *request, gp::Message *response, gp::Closure *done) {
     // ensure a controller and a closure exist
-    boost::shared_ptr< gp::RpcController > _controller;
+    boost::scoped_ptr< gp::RpcController > _controller;
     if (!controller) {
       _controller.reset(new Controller());
       controller = _controller.get();
