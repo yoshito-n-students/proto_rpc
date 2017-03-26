@@ -11,6 +11,7 @@
 #include <boost/asio/streambuf.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/bind.hpp>
+#include <boost/date_time/posix_time/posix_time_duration.hpp>
 #include <boost/ref.hpp>
 #include <boost/scoped_ptr.hpp>
 #include <boost/system/error_code.hpp>
@@ -31,8 +32,12 @@ namespace proto_rpc {
 
 class Channel : public gp::RpcChannel {
 public:
-  Channel(const ba::ip::address_v4 &address, const unsigned short port)
-      : endpoint_(address, port), socket_(queue_), timer_(queue_) {}
+  enum { DEFAULT_TIMEOUT = 5000 };
+
+public:
+  Channel(const ba::ip::address_v4 &address, const unsigned short port,
+          const bp::time_duration &timeout = bp::milliseconds(DEFAULT_TIMEOUT))
+      : endpoint_(address, port), timeout_(timeout), socket_(queue_), timer_(queue_) {}
 
   virtual ~Channel() {}
 
@@ -128,11 +133,9 @@ public:
   }
 
 private:
-  enum { TIMEOUT = 5000 };
-
   void connect() {
-    // set timeout. on timeout, the expiration handler will cancel operations on  the socket.
-    timer_.expires_from_now(bp::milliseconds(TIMEOUT));
+    // set timeout. on timeout, the expiration handler will cancel operations on the socket.
+    timer_.expires_from_now(timeout_);
     timer_.async_wait(boost::bind(&Channel::handleTimerEvent, this, _1));
 
     // start connecting to the endpoint. the connection handler will cancel the timeout operation.
@@ -155,7 +158,7 @@ private:
     ba::streambuf buffer;
     encode(message, buffer);
 
-    timer_.expires_from_now(bp::milliseconds(TIMEOUT));
+    timer_.expires_from_now(timeout_);
     timer_.async_wait(boost::bind(&Channel::handleTimerEvent, this, _1));
 
     bs::error_code error;
@@ -171,7 +174,7 @@ private:
   }
 
   std::size_t read(ba::streambuf &buffer, gp::Message &message) {
-    timer_.expires_from_now(bp::milliseconds(TIMEOUT));
+    timer_.expires_from_now(timeout_);
     timer_.async_wait(boost::bind(&Channel::handleTimerEvent, this, _1));
 
     bs::error_code error;
@@ -217,7 +220,7 @@ private:
     if (error == ba::error::operation_aborted) { // canceled by a socket event handler
       return;
     } else if (error) {
-      std::cerr << error.message() << std::endl;
+      std::cerr << "Error on timer event: " << error.message() << std::endl;
       return;
     }
     socket_.cancel();
@@ -225,6 +228,7 @@ private:
 
 private:
   const ba::ip::tcp::endpoint endpoint_;
+  const bp::time_duration timeout_;
   ba::io_service queue_;
   ba::ip::tcp::socket socket_;
   ba::deadline_timer timer_;

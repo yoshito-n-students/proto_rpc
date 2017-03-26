@@ -11,7 +11,7 @@
 #include <boost/asio/streambuf.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/bind.hpp>
-#include <boost/date_time/posix_time/posix_time_types.hpp>
+#include <boost/date_time/posix_time/posix_time_duration.hpp>
 #include <boost/enable_shared_from_this.hpp>
 #include <boost/make_shared.hpp>
 #include <boost/scoped_ptr.hpp>
@@ -34,21 +34,18 @@ class Session : public boost::enable_shared_from_this< Session > {
   friend class Server;
 
 public:
-  Session(ba::io_service &queue, const boost::shared_ptr< gp::Service > &service)
-      : socket_(queue), timer_(queue), service_(service) {}
+  Session(ba::io_service &queue, const boost::shared_ptr< gp::Service > &service,
+          const bp::time_duration &timeout)
+      : socket_(queue), timer_(queue), service_(service), timeout_(timeout) {}
 
-  virtual ~Session() { std::cout << "Closed the session (" << this << ")" << std::endl; }
+  virtual ~Session() { std::cout << "Session " << this << ": Closed" << std::endl; }
 
   void start() {
-    std::cout << "Started a session (" << this << ") with " << socket_.remote_endpoint()
-              << std::endl;
+    std::cout << "Session " << this << ": Started with " << socket_.remote_endpoint() << std::endl;
     startReadServiceDescriptor();
   }
 
 private:
-  // timeout in network operations in ms
-  enum { TIMEOUT = 5000 };
-
   // common elements of the following data types
   struct CommonData {
     CommonData() { info.set_failed(false); }
@@ -104,7 +101,7 @@ private:
     const boost::shared_ptr< AuthorizationData > data(boost::make_shared< AuthorizationData >());
 
     // set timeout. on timeout, the expiration handler will cancel operations on the socket.
-    timer_.expires_from_now(bp::milliseconds(TIMEOUT));
+    timer_.expires_from_now(timeout_);
     timer_.async_wait(boost::bind(&Session::handleExpire, this, _1, shared_from_this()));
 
     // start reading the socket. the receive handler will cancel the timeout.
@@ -122,7 +119,8 @@ private:
     if (error == ba::error::eof) { // disconnected by the client
       return;
     } else if (error) {
-      std::cerr << error.message() << std::endl;
+      std::cerr << "Session " << this
+                << ": Error on reading service descriptor: " << error.message() << std::endl;
       return;
     }
 
@@ -158,7 +156,7 @@ private:
   void startWriteAuthorizationResult(const boost::shared_ptr< AuthorizationData > &data) {
     encode(data->info, data->write_buffer);
 
-    timer_.expires_from_now(bp::milliseconds(TIMEOUT));
+    timer_.expires_from_now(timeout_);
     timer_.async_wait(boost::bind(&Session::handleExpire, this, _1, shared_from_this()));
 
     ba::async_write(
@@ -174,7 +172,8 @@ private:
     if (error == ba::error::eof) { // disconnected by the client
       return;
     } else if (error) {
-      std::cerr << error.message() << std::endl;
+      std::cerr << "Session " << this
+                << ": Error on writing authorization result: " << error.message() << std::endl;
       return;
     }
 
@@ -200,7 +199,7 @@ private:
     // starting point of a RPC. prepare data for this RPC.
     const boost::shared_ptr< RpcData > data(boost::make_shared< RpcData >());
 
-    timer_.expires_from_now(bp::milliseconds(TIMEOUT));
+    timer_.expires_from_now(timeout_);
     timer_.async_wait(boost::bind(&Session::handleExpire, this, _1, shared_from_this()));
 
     ba::async_read_until(
@@ -216,7 +215,8 @@ private:
     if (error == ba::error::eof) { // disconnected by the client
       return;
     } else if (error) {
-      std::cerr << error.message() << std::endl;
+      std::cerr << "Session " << this << ": Error on reading method index: " << error.message()
+                << std::endl;
       return;
     }
 
@@ -244,7 +244,7 @@ private:
   void startReadRequest(const boost::shared_ptr< RpcData > &data) {
     data->request.reset(service_->GetRequestPrototype(data->method).New());
 
-    timer_.expires_from_now(bp::milliseconds(TIMEOUT));
+    timer_.expires_from_now(timeout_);
     timer_.async_wait(boost::bind(&Session::handleExpire, this, _1, shared_from_this()));
 
     ba::async_read_until(
@@ -260,7 +260,8 @@ private:
     if (error == ba::error::eof) { // disconnected by the client
       return;
     } else if (error) {
-      std::cerr << error.message() << std::endl;
+      std::cerr << "Session " << this << ": Error on reading request: " << error.message()
+                << std::endl;
       return;
     }
 
@@ -280,7 +281,7 @@ private:
   void startConsumeRequest(const boost::shared_ptr< RpcData > &data) {
     data->request.reset(new Placeholder());
 
-    timer_.expires_from_now(bp::milliseconds(TIMEOUT));
+    timer_.expires_from_now(timeout_);
     timer_.async_wait(boost::bind(&Session::handleExpire, this, _1, shared_from_this()));
 
     ba::async_read_until(
@@ -296,7 +297,8 @@ private:
     if (error == ba::error::eof) { // disconnected by the client
       return;
     } else if (error) {
-      std::cerr << error.message() << std::endl;
+      std::cerr << "Session " << this << ": Error on consuming request: " << error.message()
+                << std::endl;
       return;
     }
 
@@ -340,7 +342,7 @@ private:
     encode(data->info, data->write_buffer);
     encode(*data->response, data->write_buffer);
 
-    timer_.expires_from_now(bp::milliseconds(TIMEOUT));
+    timer_.expires_from_now(timeout_);
     timer_.async_wait(boost::bind(&Session::handleExpire, this, _1, shared_from_this()));
 
     ba::async_write(socket_, data->write_buffer, boost::bind(&Session::handleWriteRpcResult, this,
@@ -354,7 +356,8 @@ private:
     if (error == ba::error::eof) { // disconnected by the client
       return;
     } else if (error) {
-      std::cerr << error.message() << std::endl;
+      std::cerr << "Session " << this << ": Error on writing RPC result: " << error.message()
+                << std::endl;
       return;
     }
 
@@ -369,7 +372,8 @@ private:
     if (error == ba::error::operation_aborted) { // timeout is canceled
       return;
     } else if (error) {
-      std::cerr << error.message() << std::endl;
+      std::cerr << "Session " << this << ": Error on waiting expiration: " << error.message()
+                << std::endl;
       return;
     }
 
@@ -380,13 +384,19 @@ private:
   ba::ip::tcp::socket socket_;
   ba::deadline_timer timer_;
   const boost::shared_ptr< gp::Service > service_;
+  const bp::time_duration timeout_;
 };
 
 class Server {
 public:
+  enum { DEFAULT_SESSION_TIMEOUT = 5000 };
+
+public:
   Server(ba::io_service &queue, const unsigned short port,
-         const boost::shared_ptr< gp::Service > &service)
-      : acceptor_(queue, ba::ip::tcp::endpoint(ba::ip::tcp::v4(), port)), service_(service) {}
+         const boost::shared_ptr< gp::Service > &service,
+         const bp::time_duration &session_timeout = bp::milliseconds(DEFAULT_SESSION_TIMEOUT))
+      : acceptor_(queue, ba::ip::tcp::endpoint(ba::ip::tcp::v4(), port)), service_(service),
+        session_timeout_(session_timeout) {}
 
   virtual ~Server() {}
 
@@ -398,7 +408,7 @@ public:
 private:
   void startAccept() {
     const boost::shared_ptr< Session > session(
-        boost::make_shared< Session >(acceptor_.get_io_service(), service_));
+        boost::make_shared< Session >(acceptor_.get_io_service(), service_, session_timeout_));
     acceptor_.async_accept(session->socket_, boost::bind(&Server::handleAccept, this, session, _1));
   }
 
@@ -415,6 +425,7 @@ private:
 private:
   ba::ip::tcp::acceptor acceptor_;
   const boost::shared_ptr< gp::Service > service_;
+  const bp::time_duration session_timeout_;
 };
 }
 
