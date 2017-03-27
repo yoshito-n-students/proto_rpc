@@ -199,8 +199,9 @@ private:
     // starting point of a RPC. prepare data for this RPC.
     const boost::shared_ptr< RpcData > data(boost::make_shared< RpcData >());
 
-    timer_.expires_from_now(timeout_);
-    timer_.async_wait(boost::bind(&Session::handleExpire, this, _1, shared_from_this()));
+    // wait without timeout
+    // timer_.expires_from_now(timeout_);
+    // timer_.async_wait(boost::bind(&Session::handleExpire, this, _1, shared_from_this()));
 
     ba::async_read_until(
         socket_, data->read_buffer, Decode(data->index),
@@ -210,7 +211,7 @@ private:
   void handleReadMethodIndex(const boost::shared_ptr< RpcData > &data, const bs::error_code &error,
                              const std::size_t bytes,
                              const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
-    timer_.cancel();
+    // timer_.cancel();
 
     if (error == ba::error::eof) { // disconnected by the client
       return;
