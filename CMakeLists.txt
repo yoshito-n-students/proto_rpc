@@ -29,15 +29,15 @@ link_directories(
 
 # RPC (remote procedure call) library for generic serivces of protobuf2
 add_custom_command(
-    OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/include/proto_rpc/rpc_messages.hpp rpc_messages.pb.cc
-    COMMAND protoc --cpp_out=${CMAKE_CURRENT_BINARY_DIR} rpc_messages.proto
-    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_BINARY_DIR}/rpc_messages.pb.h ${CMAKE_CURRENT_SOURCE_DIR}/include/proto_rpc/rpc_messages.hpp
-    DEPENDS proto/rpc_messages.proto
+    OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/include/proto_rpc/messages.hpp messages.pb.cc
+    COMMAND protoc --cpp_out=${CMAKE_CURRENT_BINARY_DIR} messages.proto
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_BINARY_DIR}/messages.pb.h ${CMAKE_CURRENT_SOURCE_DIR}/include/proto_rpc/messages.hpp
+    DEPENDS proto/messages.proto
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/proto
 )
 add_library(
     proto_rpc
-    ${CMAKE_CURRENT_BINARY_DIR}/rpc_messages.pb.cc
+    ${CMAKE_CURRENT_BINARY_DIR}/messages.pb.cc
 )
 
 # Library dependences

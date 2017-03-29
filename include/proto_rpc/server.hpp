@@ -26,7 +26,7 @@
 #include <proto_rpc/controller.hpp>
 #include <proto_rpc/message_coding.hpp>
 #include <proto_rpc/namespace.hpp>
-#include <proto_rpc/rpc_messages.hpp>
+#include <proto_rpc/messages.hpp>
 
 namespace proto_rpc {
 
@@ -116,9 +116,7 @@ private:
     // cancel the timer
     timer_.cancel();
 
-    if (error == ba::error::eof) { // disconnected by the client
-      return;
-    } else if (error) {
+    if (error) {
       std::cerr << "Session " << this
                 << ": Error on reading service descriptor: " << error.message() << std::endl;
       return;
@@ -169,9 +167,7 @@ private:
                                       const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
     timer_.cancel();
 
-    if (error == ba::error::eof) { // disconnected by the client
-      return;
-    } else if (error) {
+    if (error) {
       std::cerr << "Session " << this
                 << ": Error on writing authorization result: " << error.message() << std::endl;
       return;
@@ -199,10 +195,7 @@ private:
     // starting point of a RPC. prepare data for this RPC.
     const boost::shared_ptr< RpcData > data(boost::make_shared< RpcData >());
 
-    // wait without timeout
-    // timer_.expires_from_now(timeout_);
-    // timer_.async_wait(boost::bind(&Session::handleExpire, this, _1, shared_from_this()));
-
+    // wait the first data or disconnection from the client without timeout
     ba::async_read_until(
         socket_, data->read_buffer, Decode(data->index),
         boost::bind(&Session::handleReadMethodIndex, this, data, _1, _2, shared_from_this()));
@@ -211,8 +204,6 @@ private:
   void handleReadMethodIndex(const boost::shared_ptr< RpcData > &data, const bs::error_code &error,
                              const std::size_t bytes,
                              const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
-    // timer_.cancel();
-
     if (error == ba::error::eof) { // disconnected by the client
       return;
     } else if (error) {
@@ -258,9 +249,7 @@ private:
                          const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
     timer_.cancel();
 
-    if (error == ba::error::eof) { // disconnected by the client
-      return;
-    } else if (error) {
+    if (error) {
       std::cerr << "Session " << this << ": Error on reading request: " << error.message()
                 << std::endl;
       return;
@@ -295,9 +284,7 @@ private:
                             const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
     timer_.cancel();
 
-    if (error == ba::error::eof) { // disconnected by the client
-      return;
-    } else if (error) {
+    if (error) {
       std::cerr << "Session " << this << ": Error on consuming request: " << error.message()
                 << std::endl;
       return;
@@ -354,9 +341,7 @@ private:
                             const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
     timer_.cancel();
 
-    if (error == ba::error::eof) { // disconnected by the client
-      return;
-    } else if (error) {
+    if (error) {
       std::cerr << "Session " << this << ": Error on writing RPC result: " << error.message()
                 << std::endl;
       return;
