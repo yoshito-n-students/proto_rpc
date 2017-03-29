@@ -116,9 +116,7 @@ private:
     // cancel the timer
     timer_.cancel();
 
-    if (error == ba::error::eof) { // disconnected by the client
-      return;
-    } else if (error) {
+    if (error) {
       std::cerr << "Session " << this
                 << ": Error on reading service descriptor: " << error.message() << std::endl;
       return;
@@ -169,9 +167,7 @@ private:
                                       const boost::shared_ptr< Session > & /*tracked_this_ptr*/) {
     timer_.cancel();
 
-    if (error == ba::error::eof) { // disconnected by the client
-      return;
-    } else if (error) {
+    if (error) {
       std::cerr << "Session " << this
                 << ": Error on writing authorization result: " << error.message() << std::endl;
       return;
