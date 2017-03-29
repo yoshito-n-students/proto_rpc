@@ -26,7 +26,7 @@
 #include <proto_rpc/controller.hpp>
 #include <proto_rpc/message_coding.hpp>
 #include <proto_rpc/namespace.hpp>
-#include <proto_rpc/rpc_messages.hpp>
+#include <proto_rpc/messages.hpp>
 
 namespace proto_rpc {
 
