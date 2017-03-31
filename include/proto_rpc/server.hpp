@@ -25,8 +25,8 @@
 
 #include <proto_rpc/controller.hpp>
 #include <proto_rpc/message_coding.hpp>
-#include <proto_rpc/namespace.hpp>
 #include <proto_rpc/messages.hpp>
+#include <proto_rpc/namespace.hpp>
 
 namespace proto_rpc {
 
@@ -382,14 +382,12 @@ public:
          const boost::shared_ptr< gp::Service > &service,
          const bp::time_duration &session_timeout = bp::milliseconds(DEFAULT_SESSION_TIMEOUT))
       : acceptor_(queue, ba::ip::tcp::endpoint(ba::ip::tcp::v4(), port)), service_(service),
-        session_timeout_(session_timeout) {}
-
-  virtual ~Server() {}
-
-  void start() {
+        session_timeout_(session_timeout) {
     std::cout << "Started a server at " << acceptor_.local_endpoint() << std::endl;
     startAccept();
   }
+
+  virtual ~Server() {}
 
 private:
   void startAccept() {
