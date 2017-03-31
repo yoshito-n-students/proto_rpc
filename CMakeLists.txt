@@ -5,26 +5,12 @@ project(proto_rpc)
 
 # Existing libraries this project uses
 find_package(
-    Boost REQUIRED
-    system
-)
-find_library(
-    protobuf
-    NAMES libprotobuf
-    PATHS $ENV{PROTOBUF_LIBRARYDIR}
+    Protobuf REQUIRED
 )
 
 # Location of include files
 include_directories(
-    include
-    ${Boost_INCLUDE_DIRS}
-    $ENV{PROTOBUF_INCLUDEDIR}
-)
-
-# Location of library files
-link_directories(
-    ${Boost_LIBRARY_DIRS}
-    $ENV{PROTOBUF_LIBRARYDIR}
+    ${PROTOBUF_INCLUDE_DIRS}
 )
 
 # RPC (remote procedure call) library for generic serivces of protobuf2
@@ -43,5 +29,5 @@ add_library(
 # Library dependences
 target_link_libraries(
     proto_rpc
-    ${protobuf}
+    ${PROTOBUF_LIBRARIES}
 )
