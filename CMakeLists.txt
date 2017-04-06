@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.7)
+cmake_minimum_required(VERSION 2.8.3)
 
 # Name of this project
 project(proto_rpc)
